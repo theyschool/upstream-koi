@@ -4,11 +4,16 @@
 
 const PLUCK_NOTES = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5];
 
+/** A slow pentatonic melody over the pad: a note wanders up and down. */
+const MELODY = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5];
+
 export function createAudio() {
   let context = null;
   let master = null;
   let muted = false;
   let padStarted = false;
+  let melodyStep = 2;
+  let melodyTimer = null;
 
   function ensure() {
     if (context) return true;
@@ -64,11 +69,26 @@ export function createAudio() {
     }
   }
 
+  function startMelody() {
+    if (melodyTimer !== null) return;
+    const playNext = () => {
+      melodyStep = Math.max(0, Math.min(MELODY.length - 1,
+        melodyStep + [-2, -1, -1, 0, 1, 1, 2][Math.floor(Math.random() * 7)]));
+      if (Math.random() < 0.7) {
+        tone(MELODY[melodyStep], 1.4, 'sine', 0.045);
+        if (Math.random() < 0.25) tone(MELODY[melodyStep] * 2, 0.9, 'sine', 0.02);
+      }
+      melodyTimer = setTimeout(playNext, 850);
+    };
+    melodyTimer = setTimeout(playNext, 1200);
+  }
+
   return {
     /** Call on the first gesture; unlocks the context and starts the pad. */
     unlock() {
       if (ensure() && context.state === 'suspended') context.resume();
       startPad();
+      startMelody();
     },
     pluck(combo) {
       const note = PLUCK_NOTES[Math.min(combo, PLUCK_NOTES.length - 1)];
@@ -88,6 +108,9 @@ export function createAudio() {
     },
     dash() {
       tone(320, 0.25, 'sawtooth', 0.07, 720);
+    },
+    near() {
+      tone(1567.98, 0.12, 'sine', 0.1);
     },
     chime() {
       for (const [i, freq] of [523.25, 659.25, 783.99, 1046.5].entries()) {

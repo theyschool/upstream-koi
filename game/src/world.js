@@ -6,9 +6,10 @@
 // about screens or sound.
 
 import {
-  BUBBLE, COMBO_WINDOW, EEL, FIELD, HEARTS, HERON, KOI, LOTUS, NET,
-  PEARL, POOL_SIZE, REACHES, ROCK, SCALE, WHIRL,
+  BUBBLE, COMBO_WINDOW, EEL, FIELD, HEARTS, HERON, KOI, LOTUS, MOON,
+  NEAR_MISS, NET, PEARL, POOL_SIZE, REACHES, ROCK, SCALE, WHIRL,
 } from './config.js';
+import { chooseGifts } from './upgrades.js';
 
 export const KIND_PEARL = 0;
 export const KIND_SCALE = 1;
@@ -18,6 +19,7 @@ export const KIND_ROCK = 4;
 export const KIND_NET = 5;
 export const KIND_EEL = 6;
 export const KIND_WHIRL = 7;
+export const KIND_MOON = 8;
 
 export const EVENT_HIT = 1;
 export const EVENT_PEARL = 2;
@@ -28,6 +30,7 @@ export const EVENT_SCALE = 32;
 export const EVENT_LOTUS = 64;
 export const EVENT_DASH = 128;
 export const EVENT_BUBBLE = 256;
+export const EVENT_NEAR = 512;
 
 function dist(ax, ay, bx, by) {
   return Math.hypot(ax - bx, ay - by);
@@ -37,11 +40,11 @@ export function createWorld(random) {
   const koi = {
     x: FIELD.width / 2, y: FIELD.height * 0.72, vx: 0, vy: 0,
     angle: -Math.PI / 2, tail: 0, dashX: 0, dashY: -1,
-    dashTime: 0, dashCooldown: 0, invulnerable: 0,
+    dashTime: 0, dashCooldown: 0, dashMax: KOI.dashCooldown, invulnerable: 0,
   };
   const entities = [];
   for (let i = 0; i < POOL_SIZE; i += 1) {
-    entities.push({ active: false, kind: KIND_PEARL, x: 0, y: 0, vx: 0, vy: 0, radius: 10, phase: 0, seed: 0 });
+    entities.push({ active: false, kind: KIND_PEARL, x: 0, y: 0, vx: 0, vy: 0, radius: 10, phase: 0, seed: 0, nearMissed: false });
   }
   const particles = [];
   for (let i = 0; i < 64; i += 1) {
@@ -59,9 +62,11 @@ export function createWorld(random) {
   const state = {
     koi, entities, particles, floaters, strikes,
     score: 0, pearls: 0, combo: 0, comboTimer: 0, bestCombo: 0,
-    hearts: HEARTS, reachIndex: 0, progress: 0, elapsed: 0,
-    reachDone: false, shake: 0,
-    timers: { pearl: 0, scale: 0, lotus: 0, bubble: 0, rock: 0, net: 0, eel: 0, heron: 0, whirl: 0 },
+    hearts: HEARTS, maxHearts: HEARTS, reachIndex: 0, progress: 0, elapsed: 0,
+    reachDone: false, shake: 0, bannerTimer: 0,
+    gifts: [], offered: [], scoreMult: 1, magnet: false,
+    comboWindow: COMBO_WINDOW, speedMult: 1,
+    timers: { pearl: 0, moon: 0, scale: 0, lotus: 0, bubble: 0, rock: 0, net: 0, eel: 0, heron: 0, whirl: 0 },
   };
 
   function reach() {
@@ -70,7 +75,7 @@ export function createWorld(random) {
 
   function resetTimers() {
     const t = state.timers;
-    t.pearl = 0.4; t.scale = SCALE.interval; t.lotus = LOTUS.interval;
+    t.pearl = 0.4; t.moon = MOON.interval; t.scale = SCALE.interval; t.lotus = LOTUS.interval;
     t.bubble = BUBBLE.interval; t.rock = ROCK.interval; t.net = NET.interval;
     t.eel = EEL.interval; t.heron = HERON.interval; t.whirl = WHIRL.interval;
   }
@@ -86,21 +91,52 @@ export function createWorld(random) {
     for (const f of floaters) f.active = false;
     for (const s of strikes) s.active = false;
     state.score = 0; state.pearls = 0; state.combo = 0; state.comboTimer = 0;
-    state.bestCombo = 0; state.hearts = HEARTS; state.reachIndex = 0;
+    state.bestCombo = 0; state.hearts = HEARTS; state.maxHearts = HEARTS; state.reachIndex = 0;
     state.progress = 0; state.elapsed = 0; state.reachDone = false; state.shake = 0;
+    state.bannerTimer = 0;
+    state.gifts = []; state.offered = []; state.scoreMult = 1; state.magnet = false;
+    state.comboWindow = COMBO_WINDOW; state.speedMult = 1;
+    koi.dashMax = KOI.dashCooldown;
     resetTimers();
+  }
+
+  /** A fresh run: reset, then announce the first reach over the water. */
+  function startRun() {
+    reset();
+    state.bannerTimer = 2.6;
+  }
+
+  /** Take a river gift: one clear change to the koi, for the rest of the run. */
+  function applyGift(id) {
+    if (id === 'heart') {
+      state.maxHearts = Math.min(5, state.maxHearts + 1);
+      state.hearts = Math.min(state.maxHearts, state.hearts + 1);
+    } else if (id === 'swift') {
+      state.speedMult *= 1.12;
+    } else if (id === 'magnet') {
+      state.magnet = true;
+    } else if (id === 'combo') {
+      state.comboWindow = 5;
+    } else if (id === 'dash') {
+      koi.dashMax = KOI.dashCooldown / 2;
+    } else if (id === 'gold') {
+      state.scoreMult = 1.25;
+    }
+    state.gifts.push(id);
   }
 
   function nextReach() {
     state.reachIndex += 1;
     state.progress = 0;
     state.reachDone = false;
+    state.offered = [];
     for (const e of entities) e.active = false;
     for (const s of strikes) s.active = false;
     koi.x = FIELD.width / 2;
     koi.y = FIELD.height * 0.72;
     koi.vx = 0; koi.vy = 0;
     koi.invulnerable = 1;
+    state.bannerTimer = 2.6;
     resetTimers();
   }
 
@@ -142,7 +178,7 @@ export function createWorld(random) {
     for (let i = 0; i < PEARL.arc; i += 1) {
       const e = freeEntity();
       if (!e) return;
-      e.active = true; e.kind = KIND_PEARL;
+      e.active = true; e.kind = KIND_PEARL; e.nearMissed = false;
       e.x = cx + (i - (PEARL.arc - 1) / 2) * 46;
       e.y = cy - Math.abs(i - (PEARL.arc - 1) / 2) * -18 - i * 8;
       e.vx = 0; e.vy = 0; e.radius = PEARL.radius;
@@ -153,7 +189,7 @@ export function createWorld(random) {
   function spawnOne(kind, radius, y) {
     const e = freeEntity();
     if (!e) return;
-    e.active = true; e.kind = kind;
+    e.active = true; e.kind = kind; e.nearMissed = false;
     e.x = 80 + random() * (FIELD.width - 160);
     e.y = y ?? -30;
     e.vx = 0; e.vy = 0; e.radius = radius;
@@ -167,7 +203,7 @@ export function createWorld(random) {
   function spawnNet() {
     const e = freeEntity();
     if (!e) return;
-    e.active = true; e.kind = KIND_NET;
+    e.active = true; e.kind = KIND_NET; e.nearMissed = false;
     e.x = 100 + random() * (FIELD.width - 200 - NET.width);
     e.y = -NET.height; e.vx = 0; e.vy = 0;
     e.radius = NET.width / 2; e.phase = 0; e.seed = random();
@@ -177,7 +213,7 @@ export function createWorld(random) {
     const e = freeEntity();
     if (!e) return;
     const fromLeft = random() < 0.5;
-    e.active = true; e.kind = KIND_EEL;
+    e.active = true; e.kind = KIND_EEL; e.nearMissed = false;
     e.x = fromLeft ? -40 : FIELD.width + 40;
     e.y = 140 + random() * (FIELD.height - 280);
     e.vx = (fromLeft ? 1 : -1) * EEL.speed;
@@ -205,9 +241,9 @@ export function createWorld(random) {
     e.active = false;
     if (e.kind === KIND_PEARL) {
       state.combo += 1;
-      state.comboTimer = COMBO_WINDOW;
+      state.comboTimer = state.comboWindow;
       state.bestCombo = Math.max(state.bestCombo, state.combo);
-      const gained = PEARL.points * Math.min(state.combo, 8);
+      const gained = Math.round(PEARL.points * Math.min(state.combo, 8) * state.scoreMult);
       state.score += gained;
       state.pearls += 1;
       burst(e.x, e.y, '#bff6ff', 8, 120);
@@ -216,21 +252,33 @@ export function createWorld(random) {
     }
     if (e.kind === KIND_SCALE) {
       state.combo += 2;
-      state.comboTimer = COMBO_WINDOW;
-      const gained = SCALE.points * Math.max(1, Math.min(state.combo, 8));
+      state.comboTimer = state.comboWindow;
+      const gained = Math.round(SCALE.points * Math.max(1, Math.min(state.combo, 8)) * state.scoreMult);
       state.score += gained;
       burst(e.x, e.y, '#ffd166', 12, 160);
       floater(e.x, e.y - 14, `Golden scale +${gained}`);
       return EVENT_SCALE;
     }
+    if (e.kind === KIND_MOON) {
+      state.combo += 2;
+      state.comboTimer = state.comboWindow;
+      state.bestCombo = Math.max(state.bestCombo, state.combo);
+      const gained = Math.round(MOON.points * state.scoreMult);
+      state.score += gained;
+      burst(e.x, e.y, '#ffe9a8', 16, 200);
+      floater(e.x, e.y - 14, `Moon pearl +${gained}`);
+      return EVENT_SCALE;
+    }
     if (e.kind === KIND_LOTUS) {
-      state.hearts = Math.min(HEARTS, state.hearts + 1);
-      state.score += LOTUS.points;
+      state.hearts = Math.min(state.maxHearts, state.hearts + 1);
+      const gained = Math.round(LOTUS.points * state.scoreMult);
+      state.score += gained;
       burst(e.x, e.y, '#ff8fb1', 12, 140);
       floater(e.x, e.y - 14, `Lotus +1 heart`);
       return EVENT_LOTUS;
     }
-    state.score += BUBBLE.points;
+    const gained = Math.round(BUBBLE.points * state.scoreMult);
+    state.score += gained;
     koi.dashCooldown = 0;
     burst(e.x, e.y, '#9fe8ff', 6, 100);
     floater(e.x, e.y - 14, 'Dash ready');
@@ -254,6 +302,7 @@ export function createWorld(random) {
     if (koi.dashCooldown > 0) koi.dashCooldown = Math.max(0, koi.dashCooldown - dt);
     if (koi.invulnerable > 0) koi.invulnerable = Math.max(0, koi.invulnerable - dt);
     if (state.shake > 0) state.shake = Math.max(0, state.shake - dt);
+    if (state.bannerTimer > 0) state.bannerTimer = Math.max(0, state.bannerTimer - dt);
 
     if (dashRequested && koi.dashCooldown <= 0 && koi.dashTime <= 0) {
       const dx = steer ? steer.x : Math.sin(koi.angle);
@@ -262,7 +311,7 @@ export function createWorld(random) {
       koi.dashX = dx / len;
       koi.dashY = dy / len;
       koi.dashTime = KOI.dashTime;
-      koi.dashCooldown = KOI.dashCooldown;
+      koi.dashCooldown = koi.dashMax;
       koi.invulnerable = Math.max(koi.invulnerable, 0.35);
       burst(koi.x, koi.y, '#9fe8ff', 10, 140);
       events |= EVENT_DASH;
@@ -271,8 +320,8 @@ export function createWorld(random) {
     let wantX = 0;
     let wantY = current;
     if (steer) {
-      wantX = steer.x * KOI.speed;
-      wantY = steer.y * KOI.speed + current;
+      wantX = steer.x * KOI.speed * state.speedMult;
+      wantY = steer.y * KOI.speed * state.speedMult + current;
     }
     if (koi.dashTime > 0) {
       koi.dashTime -= dt;
@@ -308,7 +357,8 @@ export function createWorld(random) {
       if (state.progress >= reach().distance) {
         state.progress = reach().distance;
         state.reachDone = true;
-        state.score += reach().bonus;
+        state.score += Math.round(reach().bonus * state.scoreMult);
+        state.offered = chooseGifts(random, state.gifts, state.maxHearts);
         burst(koi.x, koi.y - 30, '#ffd166', 22, 220);
         events |= state.reachIndex >= REACHES.length - 1 ? EVENT_VICTORY : EVENT_REACH;
       }
@@ -319,6 +369,8 @@ export function createWorld(random) {
     const hazardOn = state.elapsed > 2;
     t.pearl -= dt;
     if (t.pearl <= 0) { spawnPearlArc(); t.pearl = PEARL.interval + random() * 0.5; }
+    t.moon -= dt;
+    if (t.moon <= 0) { spawnOne(KIND_MOON, MOON.radius); t.moon = MOON.interval + random() * 4; }
     t.scale -= dt;
     if (t.scale <= 0) { spawnOne(KIND_SCALE, SCALE.radius); t.scale = SCALE.interval + random() * 3; }
     t.lotus -= dt;
@@ -381,11 +433,33 @@ export function createWorld(random) {
       } else {
         e.y += (drift + 12) * dt;
         e.phase += dt * 2;
+        // A pearl magnet pulls nearby pearls and scales toward the koi.
+        if (state.magnet && (e.kind === KIND_PEARL || e.kind === KIND_SCALE)) {
+          const dx = koi.x - e.x;
+          const dy = koi.y - e.y;
+          const d = Math.hypot(dx, dy);
+          if (d < 170 && d > 1) {
+            e.x += (dx / d) * 120 * dt;
+            e.y += (dy / d) * 120 * dt;
+          }
+        }
         if (e.y > FIELD.height + 40) { e.active = false; continue; }
       }
       if (harmless) continue;
       const d = dist(koi.x, koi.y, e.x, e.y);
-      if (e.kind === KIND_PEARL || e.kind === KIND_SCALE || e.kind === KIND_LOTUS || e.kind === KIND_BUBBLE) {
+      // A hazard that rushes past close enough to scare, but never touches.
+      if (!e.nearMissed && (e.kind === KIND_ROCK || e.kind === KIND_NET || e.kind === KIND_EEL || e.kind === KIND_WHIRL)) {
+        const hitAt = e.kind === KIND_NET ? e.radius + KOI.radius : e.radius + KOI.radius - 6;
+        if (d > hitAt && d < hitAt + NEAR_MISS.distance) {
+          e.nearMissed = true;
+          const gained = Math.round(NEAR_MISS.points * state.scoreMult);
+          state.score += gained;
+          burst(koi.x, koi.y - 20, '#ffffff', 5, 90);
+          floater(koi.x, koi.y - 34, `Close! +${gained}`);
+          events |= EVENT_NEAR;
+        }
+      }
+      if (e.kind === KIND_PEARL || e.kind === KIND_SCALE || e.kind === KIND_MOON || e.kind === KIND_LOTUS || e.kind === KIND_BUBBLE) {
         if (d < e.radius + KOI.radius - 2) events |= collect(e);
       } else if (e.kind === KIND_NET) {
         const inX = Math.abs(koi.x - e.x) < NET.width / 2 + KOI.radius - 6;
@@ -420,5 +494,5 @@ export function createWorld(random) {
   }
 
   reset();
-  return { state, reset, step, nextReach, reach };
+  return { state, reset, startRun, step, nextReach, applyGift, reach };
 }

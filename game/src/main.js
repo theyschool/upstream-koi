@@ -9,13 +9,13 @@
 import { BEST_KEY, HEARTS, REACHES, STEP } from './config.js';
 import { createRandom } from './random.js';
 import {
-  createWorld, EVENT_DASH, EVENT_HIT, EVENT_LOTUS, EVENT_OVER,
+  createWorld, EVENT_DASH, EVENT_HIT, EVENT_LOTUS, EVENT_NEAR, EVENT_OVER,
   EVENT_PEARL, EVENT_REACH, EVENT_SCALE, EVENT_VICTORY,
 } from './world.js';
-import { ACTION_CONFIRM, ACTION_DASH, ACTION_MUTE, ACTION_PAUSE, createInput } from './input.js';
+import { ACTION_CONFIRM, ACTION_DASH, ACTION_GIFT_1, ACTION_GIFT_2, ACTION_GIFT_3, ACTION_MUTE, ACTION_PAUSE, createInput } from './input.js';
 import { createAudio } from './audio.js';
 import {
-  createRenderer, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY,
+  createRenderer, giftCardRects, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY,
   SCREEN_REACH, SCREEN_TITLE, SCREEN_VICTORY,
 } from './render.js';
 import { stageShot } from './shots.js';
@@ -54,7 +54,7 @@ function runShot(name) {
   const scene = stageShot(name, world);
   let painted = 0;
   function paint() {
-    renderer.draw(world.state, scene.screen, scene.best);
+    renderer.draw(world.state, scene.screen, scene.best, false, true);
     painted += 1;
     if (painted < 2) requestAnimationFrame(paint);
     else window.__shotReady = true;
@@ -66,6 +66,7 @@ function runGame() {
   const input = createInput(canvas);
   let screen = SCREEN_TITLE;
   let best = readBest();
+  let newBest = false;
   let accumulator = 0;
   let last = performance.now();
 
@@ -74,14 +75,28 @@ function runGame() {
   }
 
   function startGame() {
-    world.reset();
+    world.startRun();
     accumulator = 0;
     screen = SCREEN_PLAY;
     announce(`Playing. ${HEARTS} hearts. Swim upstream.`);
   }
 
+  /** Take the offered gift at `index`, then swim the next reach. */
+  function chooseGift(index) {
+    const offered = world.state.offered;
+    const gift = offered[Math.min(index, offered.length - 1)];
+    if (gift) {
+      world.applyGift(gift.id);
+      announce(`${gift.name}. ${gift.blurb}.`);
+    }
+    world.nextReach();
+    screen = SCREEN_PLAY;
+    announce(`Reach ${world.state.reachIndex + 1}: ${REACHES[world.state.reachIndex].name}.`);
+  }
+
   function finishRun(won) {
     screen = won ? SCREEN_VICTORY : SCREEN_OVER;
+    newBest = world.state.score > best && world.state.score > 0;
     if (world.state.score > best) {
       best = world.state.score;
       saveBest(best);
@@ -126,11 +141,11 @@ function runGame() {
     }
     if (actions & ACTION_CONFIRM && screen === SCREEN_TITLE) startGame();
     else if (actions & ACTION_CONFIRM && (screen === SCREEN_OVER || screen === SCREEN_VICTORY)) startGame();
-    else if (actions & ACTION_CONFIRM && screen === SCREEN_REACH) {
-      world.nextReach();
-      screen = SCREEN_PLAY;
-      announce(`Reach ${world.state.reachIndex + 1}: ${REACHES[world.state.reachIndex].name}.`);
-    } else if (actions & ACTION_PAUSE && screen === SCREEN_PLAY) {
+    else if (actions & ACTION_GIFT_1 && screen === SCREEN_REACH) chooseGift(0);
+    else if (actions & ACTION_GIFT_2 && screen === SCREEN_REACH) chooseGift(1);
+    else if (actions & ACTION_GIFT_3 && screen === SCREEN_REACH) chooseGift(2);
+    else if (actions & ACTION_CONFIRM && screen === SCREEN_REACH) chooseGift(0);
+    else if (actions & ACTION_PAUSE && screen === SCREEN_PLAY) {
       screen = SCREEN_PAUSED;
       announce('Paused.');
     } else if (actions & (ACTION_PAUSE | ACTION_CONFIRM) && screen === SCREEN_PAUSED) {
@@ -146,6 +161,7 @@ function runGame() {
     if (events & EVENT_LOTUS) audio.lotus();
     if (events & EVENT_HIT) audio.thud();
     if (events & EVENT_DASH) audio.dash();
+    if (events & EVENT_NEAR) audio.near();
     if (events & (EVENT_REACH | EVENT_VICTORY)) audio.chime();
   }
 
@@ -180,7 +196,7 @@ function runGame() {
     } else {
       accumulator = 0;
     }
-    renderer.draw(world.state, screen, best);
+    renderer.draw(world.state, screen, best, audio.isMuted(), newBest);
   }
 
   document.addEventListener('visibilitychange', () => {
@@ -190,6 +206,19 @@ function runGame() {
     }
   });
   window.addEventListener('pointerdown', () => audio.unlock(), { once: false });
+  // Clicking a gift card on the reach screen takes that gift.
+  canvas.addEventListener('pointerdown', (event) => {
+    if (screen !== SCREEN_REACH) return;
+    const rect = canvas.getBoundingClientRect();
+    const field = renderer.toField(
+      (event.clientX - rect.left) / Math.max(1, rect.width),
+      (event.clientY - rect.top) / Math.max(1, rect.height),
+    );
+    const rects = giftCardRects();
+    const at = rects.findIndex((r) =>
+      field.x >= r.x && field.x <= r.x + r.w && field.y >= r.y && field.y <= r.y + r.h);
+    if (at >= 0) chooseGift(at);
+  });
 
   announce('Upstream. A koi’s journey home. Press Enter or click to begin.');
   requestAnimationFrame(frame);

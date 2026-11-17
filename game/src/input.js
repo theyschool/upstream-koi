@@ -7,6 +7,9 @@ export const ACTION_CONFIRM = 1;
 export const ACTION_PAUSE = 2;
 export const ACTION_DASH = 4;
 export const ACTION_MUTE = 8;
+export const ACTION_GIFT_1 = 16;
+export const ACTION_GIFT_2 = 32;
+export const ACTION_GIFT_3 = 64;
 
 const UP = new Set(['ArrowUp', 'KeyW']);
 const DOWN = new Set(['ArrowDown', 'KeyS']);
@@ -16,6 +19,7 @@ const CONFIRM = new Set(['Enter']);
 const DASH = new Set(['Space']);
 const PAUSE = new Set(['KeyP', 'Escape']);
 const MUTE = new Set(['KeyM']);
+const GIFT = { Digit1: ACTION_GIFT_1, Digit2: ACTION_GIFT_2, Digit3: ACTION_GIFT_3 };
 
 export function createInput(target) {
   const keys = { up: false, down: false, left: false, right: false };
@@ -35,6 +39,8 @@ export function createInput(target) {
       if (!event.repeat) actions |= ACTION_PAUSE;
     } else if (MUTE.has(event.code)) {
       if (!event.repeat) actions |= ACTION_MUTE;
+    } else if (GIFT[event.code]) {
+      if (!event.repeat) actions |= GIFT[event.code];
     } else return;
     event.preventDefault();
   });

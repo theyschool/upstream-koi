@@ -4,11 +4,12 @@
 // water and light, bed and reeds, things, the koi, then the HUD and panels —
 // so a screenshot reads at a glance even when it is shrunk.
 
-import { FIELD, FONT, HEARTS, KOI, NET, PALETTE, REACHES } from './config.js';
+import { FIELD, FONT, KOI, NET, PALETTE, REACHES, REACH_PALETTES } from './config.js';
 import {
-  KIND_BUBBLE, KIND_EEL, KIND_LOTUS, KIND_NET, KIND_PEARL,
+  KIND_BUBBLE, KIND_EEL, KIND_LOTUS, KIND_MOON, KIND_NET, KIND_PEARL,
   KIND_ROCK, KIND_SCALE, KIND_WHIRL,
 } from './world.js';
+import { GIFTS } from './upgrades.js';
 
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
@@ -18,6 +19,16 @@ export const SCREEN_OVER = 'over';
 export const SCREEN_VICTORY = 'victory';
 
 const PANEL = { width: 640, top: 150, line: 34, bottom: 72 };
+
+/** The three gift cards on the reach screen, in playfield coordinates. */
+export function giftCardRects() {
+  const w = 300;
+  const h = 190;
+  const gap = 24;
+  const y = 248;
+  const x0 = (FIELD.width - (w * 3 + gap * 2)) / 2;
+  return [0, 1, 2].map((i) => ({ x: x0 + i * (w + gap), y, w, h }));
+}
 
 function hash(n) {
   const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
@@ -65,10 +76,11 @@ export function createRenderer(canvas) {
   }
 
   function drawWater(state) {
+    const pal = REACH_PALETTES[REACHES[state.reachIndex].palette];
     const g = context.createLinearGradient(0, 0, 0, FIELD.height);
-    g.addColorStop(0, PALETTE.surface);
-    g.addColorStop(0.35, PALETTE.water);
-    g.addColorStop(1, PALETTE.deep);
+    g.addColorStop(0, pal.surface);
+    g.addColorStop(0.35, pal.water);
+    g.addColorStop(1, pal.deep);
     context.fillStyle = g;
     context.fillRect(0, 0, FIELD.width, FIELD.height);
     // Sunlight shafts, swaying slowly with the river's clock.
@@ -86,10 +98,78 @@ export function createRenderer(canvas) {
       context.fill();
     }
     context.restore();
+    // Caustic ripples: bright wavy bands playing just under the surface.
+    context.save();
+    context.globalAlpha = 0.07;
+    context.strokeStyle = '#eafff5';
+    context.lineWidth = 7;
+    for (let i = 0; i < 4; i += 1) {
+      const y = 34 + i * 26;
+      context.beginPath();
+      for (let x = 0; x <= FIELD.width; x += 32) {
+        const yy = y + Math.sin(x * 0.014 + state.elapsed * 1.4 + i * 2.1) * 7;
+        if (x === 0) context.moveTo(x, yy);
+        else context.lineTo(x, yy);
+      }
+      context.stroke();
+    }
+    context.restore();
+    // Distant fish, dark silhouettes drifting far below the koi.
+    context.save();
+    context.globalAlpha = 0.12;
+    context.fillStyle = '#04141d';
+    for (let i = 0; i < 5; i += 1) {
+      const dir = i % 2 === 0 ? 1 : -1;
+      const span = FIELD.width + 240;
+      const x = ((hash(i + 200) * span + state.elapsed * 14 * dir) % span + span) % span - 120;
+      const y = 120 + hash(i + 300) * 380;
+      const s = 0.7 + hash(i + 310) * 0.7;
+      context.beginPath();
+      context.ellipse(x, y, 26 * s, 9 * s, 0, 0, Math.PI * 2);
+      context.fill();
+      context.beginPath();
+      context.moveTo(x - dir * 24 * s, y);
+      context.lineTo(x - dir * 38 * s, y - 9 * s);
+      context.lineTo(x - dir * 38 * s, y + 9 * s);
+      context.closePath();
+      context.fill();
+    }
+    context.restore();
+    // Rising bubbles, on fixed lanes so the scene stays deterministic.
+    context.save();
+    context.strokeStyle = '#ffffff44';
+    context.lineWidth = 1.5;
+    for (let i = 0; i < 11; i += 1) {
+      const x = 40 + hash(i + 500) * 1200;
+      const speed = 26 + hash(i + 510) * 30;
+      const y = FIELD.height - ((state.elapsed * speed + hash(i + 600) * 720) % 760);
+      const r = 2 + hash(i + 520) * 3.5;
+      context.beginPath();
+      context.arc(x, y, r, 0, Math.PI * 2);
+      context.stroke();
+    }
+    context.restore();
+    // What floats on the surface of this reach: leaves, seeds, petals.
+    context.save();
+    context.globalAlpha = 0.55;
+    context.fillStyle = pal.drift;
+    for (let i = 0; i < 9; i += 1) {
+      const span = FIELD.width + 40;
+      const x = ((hash(i + 700) * span + state.elapsed * (8 + hash(i + 710) * 10)) % span + span) % span - 20;
+      const y = 12 + hash(i + 800) * 48;
+      context.save();
+      context.translate(x, y);
+      context.rotate(Math.sin(state.elapsed * 0.8 + i) * 0.5);
+      context.beginPath();
+      context.ellipse(0, 0, 5 + hash(i + 810) * 3, 2.5, 0, 0, Math.PI * 2);
+      context.fill();
+      context.restore();
+    }
+    context.restore();
     // Riverbed: sand, stones and a few shells, placed by a fixed hash.
-    context.fillStyle = PALETTE.sand;
+    context.fillStyle = pal.sand;
     context.fillRect(0, FIELD.height - 52, FIELD.width, 52);
-    context.fillStyle = PALETTE.sandDark;
+    context.fillStyle = pal.sandDark;
     for (let i = 0; i < 26; i += 1) {
       const x = hash(i) * FIELD.width;
       const y = FIELD.height - 46 + hash(i + 40) * 38;
@@ -104,7 +184,7 @@ export function createRenderer(canvas) {
         const baseY = FIELD.height - 52;
         const sway = Math.sin(state.elapsed * 1.1 + i * 0.9 + side * 2) * 12;
         const height = 90 + hash(i + 11) * 90;
-        context.strokeStyle = i % 2 ? PALETTE.reed : PALETTE.reedDark;
+        context.strokeStyle = i % 2 ? pal.reed : pal.reedDark;
         context.lineWidth = 5;
         context.beginPath();
         context.moveTo(baseX, baseY);
@@ -136,6 +216,32 @@ export function createRenderer(canvas) {
 
   function drawEntity(e, state) {
     if (e.kind === KIND_PEARL) { drawPearl(e); return; }
+    if (e.kind === KIND_MOON) {
+      // A moon pearl: a pale-gold pearl wearing a bright halo ring.
+      const pulse = 1 + Math.sin(e.phase) * 0.1;
+      const r = e.radius * pulse;
+      const glow = context.createRadialGradient(e.x, e.y, 1, e.x, e.y, r * 3);
+      glow.addColorStop(0, '#ffe9a8cc');
+      glow.addColorStop(1, '#ffe9a800');
+      context.fillStyle = glow;
+      context.beginPath();
+      context.arc(e.x, e.y, r * 3, 0, Math.PI * 2);
+      context.fill();
+      context.strokeStyle = '#ffe9a8';
+      context.lineWidth = 2.5;
+      context.beginPath();
+      context.arc(e.x, e.y, r * 1.7, 0, Math.PI * 2);
+      context.stroke();
+      context.fillStyle = '#fff6d8';
+      context.beginPath();
+      context.arc(e.x, e.y, r, 0, Math.PI * 2);
+      context.fill();
+      context.fillStyle = '#ffd166';
+      context.beginPath();
+      context.arc(e.x - r * 0.3, e.y - r * 0.35, r * 0.3, 0, Math.PI * 2);
+      context.fill();
+      return;
+    }
     if (e.kind === KIND_SCALE) {
       context.save();
       context.translate(e.x, e.y);
@@ -254,51 +360,105 @@ export function createRenderer(canvas) {
     const k = state.koi;
     if (k.invulnerable > 0 && Math.floor(k.invulnerable * 10) % 2 === 0) return;
     const flap = Math.sin(k.tail) * 0.45;
+    const finFlap = Math.sin(k.tail * 1.3) * 0.5;
+    // A soft glow so the hero reads against dark water.
+    const glow = context.createRadialGradient(k.x, k.y, 4, k.x, k.y, 64);
+    glow.addColorStop(0, '#fff3d622');
+    glow.addColorStop(1, '#fff3d600');
+    context.fillStyle = glow;
+    context.beginPath();
+    context.arc(k.x, k.y, 64, 0, Math.PI * 2);
+    context.fill();
     context.save();
     context.translate(k.x, k.y);
     context.rotate(k.angle);
-    // Tail, flapping with the swim.
+    // Tail, flapping with the swim, with a lighter trailing edge.
     context.fillStyle = PALETTE.koiOrange;
     context.beginPath();
-    context.moveTo(-KOI.length / 2 + 6, 0);
-    context.lineTo(-KOI.length / 2 - 22, -12 - flap * 14);
-    context.lineTo(-KOI.length / 2 - 14, 0);
-    context.lineTo(-KOI.length / 2 - 22, 12 + flap * 14);
+    context.moveTo(-KOI.length / 2 + 8, 0);
+    context.lineTo(-KOI.length / 2 - 28, -15 - flap * 16);
+    context.lineTo(-KOI.length / 2 - 18, 0);
+    context.lineTo(-KOI.length / 2 - 28, 15 + flap * 16);
+    context.closePath();
+    context.fill();
+    context.fillStyle = '#ffb25e';
+    context.beginPath();
+    context.moveTo(-KOI.length / 2 - 4, 0);
+    context.lineTo(-KOI.length / 2 - 26, -11 - flap * 14);
+    context.lineTo(-KOI.length / 2 - 26, 11 + flap * 14);
     context.closePath();
     context.fill();
     // Body: cream belly, orange back, one dark spot.
-    const body = context.createLinearGradient(0, -12, 0, 12);
+    const body = context.createLinearGradient(0, -15, 0, 15);
     body.addColorStop(0, PALETTE.koiOrange);
     body.addColorStop(0.55, '#f9b26b');
     body.addColorStop(1, PALETTE.koiCream);
     context.fillStyle = body;
     context.beginPath();
-    context.ellipse(0, 0, KOI.length / 2, 13, 0, 0, Math.PI * 2);
+    context.ellipse(0, 0, KOI.length / 2, 15, 0, 0, Math.PI * 2);
     context.fill();
+    // Scales: three rows of pale arcs along the back.
+    context.strokeStyle = '#ffffff55';
+    context.lineWidth = 1.5;
+    for (let row = 0; row < 3; row += 1) {
+      for (let i = 0; i < 4; i += 1) {
+        const sx = -16 + i * 10 + row * 3;
+        const sy = -8 + row * 7;
+        context.beginPath();
+        context.arc(sx, sy, 5, 0.15 * Math.PI, 0.85 * Math.PI);
+        context.stroke();
+      }
+    }
     context.fillStyle = PALETTE.koiSpot;
     context.beginPath();
-    context.ellipse(2, -5, 8, 4.5, 0.3, 0, Math.PI * 2);
+    context.ellipse(3, -6, 9, 5, 0.3, 0, Math.PI * 2);
     context.fill();
+    context.beginPath();
+    context.ellipse(-12, 4, 6, 3.5, -0.2, 0, Math.PI * 2);
+    context.fill();
+    // Pectoral fins, rowing with the swim.
+    context.fillStyle = '#e06e1f';
+    for (const side of [-1, 1]) {
+      context.save();
+      context.translate(6, side * 12);
+      context.rotate(side * (0.5 + finFlap * 0.4));
+      context.beginPath();
+      context.ellipse(0, side * 5, 9, 4, 0, 0, Math.PI * 2);
+      context.fill();
+      context.restore();
+    }
     // Dorsal fin and eye.
     context.fillStyle = '#e06e1f';
     context.beginPath();
-    context.ellipse(-4, -12, 10, 4, -0.2, 0, Math.PI * 2);
+    context.ellipse(-5, -14, 12, 4.5, -0.2, 0, Math.PI * 2);
     context.fill();
     context.fillStyle = '#1c1c1c';
     context.beginPath();
-    context.arc(KOI.length / 2 - 10, -4, 3, 0, Math.PI * 2);
+    context.arc(KOI.length / 2 - 12, -5, 3.5, 0, Math.PI * 2);
     context.fill();
     context.fillStyle = '#ffffff';
     context.beginPath();
-    context.arc(KOI.length / 2 - 9, -5, 1.2, 0, Math.PI * 2);
+    context.arc(KOI.length / 2 - 11, -6, 1.4, 0, Math.PI * 2);
     context.fill();
+    // Whiskers, trailing from the snout.
+    context.strokeStyle = '#fff3d6cc';
+    context.lineWidth = 1.5;
+    for (const side of [-1, 1]) {
+      context.beginPath();
+      context.moveTo(KOI.length / 2 - 2, side * 3);
+      context.quadraticCurveTo(
+        KOI.length / 2 + 8, side * (7 + Math.sin(k.tail * 2) * 2),
+        KOI.length / 2 + 13, side * (10 + Math.sin(k.tail * 2 + 1) * 2),
+      );
+      context.stroke();
+    }
     context.restore();
     // Dash shimmer.
     if (k.dashTime > 0) {
       context.strokeStyle = '#bff0ffaa';
       context.lineWidth = 3;
       context.beginPath();
-      context.arc(k.x, k.y, 34, 0, Math.PI * 2);
+      context.arc(k.x, k.y, 40, 0, Math.PI * 2);
       context.stroke();
     }
   }
@@ -338,17 +498,37 @@ export function createRenderer(canvas) {
     }
   }
 
-  function drawHud(state) {
+  function drawHud(state, muted) {
+    // A dark wash behind the top row, so pearls and light never wash
+    // the score and hearts out.
+    const scrim = context.createLinearGradient(0, 0, 0, 140);
+    scrim.addColorStop(0, '#04222e59');
+    scrim.addColorStop(1, '#04222e00');
+    context.fillStyle = scrim;
+    context.fillRect(0, 0, FIELD.width, 140);
     const reach = REACHES[state.reachIndex];
     context.textBaseline = 'top';
     // Hearts, top left.
-    for (let i = 0; i < HEARTS; i += 1) heart(36 + i * 32, 34, 22, i < state.hearts);
+    for (let i = 0; i < state.maxHearts; i += 1) heart(36 + i * 32, 34, 22, i < state.hearts);
     text(`Score ${state.score}`, 24, 66, 30, PALETTE.text, 'left', 'bold');
     text(`Pearls ${state.pearls}`, 24, 100, 20, PALETTE.muted, 'left');
     if (state.combo >= 2) {
       context.fillStyle = '#ffd16622';
       context.fillRect(20, 128, 150, 34);
       text(`x${state.combo} COMBO`, 30, 152, 22, PALETTE.gold, 'left', 'bold');
+      // How long the combo has left to live.
+      context.fillStyle = '#ffffff26';
+      context.fillRect(20, 166, 150, 5);
+      context.fillStyle = PALETTE.gold;
+      context.fillRect(20, 166, 150 * Math.max(0, state.comboTimer / state.comboWindow), 5);
+    }
+    // Gifts already taken, as icons under the combo.
+    if (state.gifts.length > 0) {
+      text('GIFTS', 24, 200, 14, PALETTE.muted, 'left', 'bold');
+      state.gifts.forEach((id, i) => {
+        const gift = GIFTS.find((g) => g.id === id);
+        if (gift) text(gift.icon, 30 + i * 30, 226, 22, PALETTE.gold, 'left', 'bold');
+      });
     }
     // Reach progress, top centre.
     const barW = 380;
@@ -366,7 +546,7 @@ export function createRenderer(canvas) {
     text(`Reach ${state.reachIndex + 1} of ${REACHES.length}`, FIELD.width / 2, 84, 18, PALETTE.muted, 'center');
     // Dash gauge, top right.
     const ready = state.koi.dashCooldown <= 0;
-    const frac = ready ? 1 : 1 - state.koi.dashCooldown / 1.1;
+    const frac = ready ? 1 : 1 - state.koi.dashCooldown / state.koi.dashMax;
     context.strokeStyle = '#ffffff33';
     context.lineWidth = 6;
     context.beginPath();
@@ -377,6 +557,54 @@ export function createRenderer(canvas) {
     context.arc(FIELD.width - 52, 44, 20, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
     context.stroke();
     text(ready ? 'DASH READY' : 'DASH…', FIELD.width - 84, 40, 16, ready ? PALETTE.gold : PALETTE.muted, 'right', 'bold');
+    // Sound state, top right under the dash gauge, out of the way.
+    text(muted ? '♪ muted — M for sound' : '♪ sound on — M to mute', FIELD.width - 24, 104, 15, muted ? '#ffffff55' : PALETTE.muted, 'right');
+  }
+
+  /** The name of the reach just entered, fading over its first seconds. */
+  function drawBanner(state) {
+    if (state.bannerTimer <= 0) return;
+    const alpha = Math.min(1, state.bannerTimer / 0.6);
+    context.save();
+    context.globalAlpha = alpha;
+    const reach = REACHES[state.reachIndex];
+    text(`Reach ${state.reachIndex + 1} — ${reach.name}`, FIELD.width / 2, 250, 44, PALETTE.text, 'center', 'bold');
+    text(reach.tagline, FIELD.width / 2, 288, 22, PALETTE.muted, 'center');
+    context.restore();
+  }
+
+  /** A red pulse at the edges of the water when one heart is left. */
+  function drawLowHealth(state) {
+    if (state.hearts !== 1) return;
+    const pulse = 0.14 + 0.08 * Math.sin(state.elapsed * 4);
+    const g = context.createRadialGradient(
+      FIELD.width / 2, FIELD.height / 2, FIELD.height * 0.42,
+      FIELD.width / 2, FIELD.height / 2, FIELD.height * 0.85,
+    );
+    g.addColorStop(0, '#ff3b3000');
+    g.addColorStop(1, `rgba(255, 59, 48, ${pulse})`);
+    context.fillStyle = g;
+    context.fillRect(0, 0, FIELD.width, FIELD.height);
+  }
+
+  /** Golden petals drifting down over the victory scene. */
+  function drawVictoryPetals(state) {
+    const colors = ['#ffd166', '#ff8fb1', '#fff3d6'];
+    for (let i = 0; i < 26; i += 1) {
+      const span = FIELD.width + 40;
+      const x = ((hash(i + 900) * span + Math.sin(state.elapsed * 0.9 + i) * 30) % span + span) % span - 20;
+      const y = ((state.elapsed * (26 + hash(i + 910) * 30) + hash(i + 920) * 760) % 800) - 40;
+      context.save();
+      context.translate(x, y);
+      context.rotate(state.elapsed * 0.7 + i);
+      context.globalAlpha = 0.85;
+      context.fillStyle = colors[i % 3];
+      context.beginPath();
+      context.ellipse(0, 0, 7, 4, 0, 0, Math.PI * 2);
+      context.fill();
+      context.restore();
+    }
+    context.globalAlpha = 1;
   }
 
   function drawPanel(title, lines, prompt, accent) {
@@ -395,7 +623,45 @@ export function createRenderer(canvas) {
     text(prompt, FIELD.width / 2, y + height - 38, 23, PALETTE.gold, 'center', 'bold');
   }
 
-  function draw(state, screen, best) {
+  /** The reach-complete screen: the run's numbers, then three gift cards. */
+  function drawReachScreen(state) {
+    const done = REACHES[state.reachIndex];
+    context.fillStyle = '#04222ecc';
+    context.fillRect(0, 0, FIELD.width, FIELD.height);
+    text(`${done.name} — complete!`, FIELD.width / 2, 132, 46, PALETTE.text, 'center', 'bold');
+    text(
+      `Bonus +${done.bonus} · Score ${state.score} · Pearls ${state.pearls} · Best combo x${state.bestCombo}`,
+      FIELD.width / 2, 176, 21, PALETTE.muted, 'center',
+    );
+    text('The river offers a gift — choose one', FIELD.width / 2, 216, 22, PALETTE.gold, 'center', 'bold');
+    const rects = giftCardRects();
+    state.offered.forEach((gift, i) => {
+      const r = rects[i];
+      context.fillStyle = '#0a3a46ee';
+      context.fillRect(r.x, r.y, r.w, r.h);
+      context.strokeStyle = '#ffd16688';
+      context.lineWidth = 2;
+      context.strokeRect(r.x, r.y, r.w, r.h);
+      // The key that picks this card, in a small circle.
+      context.fillStyle = PALETTE.gold;
+      context.beginPath();
+      context.arc(r.x + 26, r.y + 26, 15, 0, Math.PI * 2);
+      context.fill();
+      text(String(i + 1), r.x + 26, r.y + 33, 18, '#04222e', 'center', 'bold');
+      text(gift.icon, r.x + r.w / 2, r.y + 92, 44, PALETTE.gold, 'center');
+      text(gift.name, r.x + r.w / 2, r.y + 132, 24, PALETTE.text, 'center', 'bold');
+      text(gift.blurb, r.x + r.w / 2, r.y + 164, 17, PALETTE.muted, 'center');
+    });
+    text('Press 1, 2 or 3 — or click a gift', FIELD.width / 2, 500, 22, PALETTE.gold, 'center', 'bold');
+    if (state.reachIndex + 1 < REACHES.length) {
+      text(
+        `Next: ${REACHES[state.reachIndex + 1].name} — ${REACHES[state.reachIndex + 1].tagline}`,
+        FIELD.width / 2, 540, 19, PALETTE.muted, 'center',
+      );
+    }
+  }
+
+  function draw(state, screen, best, muted, newBest) {
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.fillStyle = PALETTE.deep;
     context.fillRect(0, 0, canvas.width, canvas.height);
@@ -428,23 +694,22 @@ export function createRenderer(canvas) {
         'A koi’s journey home, through three reaches of river.',
         'Swim up with the mouse or WASD. Space or click to dash.',
         'Gather pearls to build a combo. Dodge rocks, nets, eels —',
-        'and the heron. Reach the spawning pool to win.',
+        'and the heron. Each reach ends with a river gift.',
+        'Reach the spawning pool to win.',
         best > 0 ? `Best score ${best}` : 'No journey yet — yours will be the first.',
       ], 'Click or press Enter to begin', '#ffd16666');
       return;
     }
-    drawHud(state);
+    drawHud(state, muted);
+    if (screen === SCREEN_PLAY) {
+      drawBanner(state);
+      drawLowHealth(state);
+    }
+    if (screen === SCREEN_VICTORY) drawVictoryPetals(state);
     if (screen === SCREEN_PAUSED) {
       drawPanel('Paused', ['The river waits for you.'], 'Press P to keep swimming');
     } else if (screen === SCREEN_REACH) {
-      const done = REACHES[state.reachIndex];
-      drawPanel(`${done.name} — complete!`, [
-        `Bonus +${done.bonus}. Score ${state.score}.`,
-        `Hearts ${state.hearts} of ${HEARTS} · Pearls ${state.pearls} · Best combo x${state.bestCombo}`,
-        state.reachIndex + 1 < REACHES.length
-          ? `Next: ${REACHES[state.reachIndex + 1].name} — the current runs faster.`
-          : 'One reach left to swim.',
-      ], 'Press Enter for the next reach');
+      drawReachScreen(state);
     } else if (screen === SCREEN_OVER) {
       drawPanel('The river wins this time', [
         `Score ${state.score} · Pearls ${state.pearls} · Best combo x${state.bestCombo}`,
@@ -452,11 +717,13 @@ export function createRenderer(canvas) {
         'The koi rests. The river keeps flowing.',
       ], 'Press Space or click to swim again', '#ff6b5e88');
     } else if (screen === SCREEN_VICTORY) {
-      drawPanel('Home at last', [
+      const lines = [
         'Three reaches swum. The spawning pool, at last.',
         `Score ${state.score} · Pearls ${state.pearls} · Best combo x${state.bestCombo}`,
         `Best ${best}`,
-      ], 'Press Space or click to swim it again');
+      ];
+      if (newBest) lines.splice(1, 0, '★ NEW BEST! ★');
+      drawPanel('Home at last', lines, 'Press Space or click to swim it again');
     }
   }
 
